@@ -6,6 +6,13 @@ def modify_packet(packet):
     if packet.haslayer(TCP) and packet.haslayer(Raw):
         payload = packet[Raw].load.decode(errors='ignore')
 
+        # Фрагментация первого пакета данных на уровне TCP
+        if packet[TCP].seq == 0:
+            fragments = fragment(payload.encode(), fragsize=1440)
+            for frag in fragments:
+                send(frag)
+            return
+        
         # Замена Host заголовка на hoSt
         payload = re.sub(r'Host:', 'hoSt:', payload)
 
