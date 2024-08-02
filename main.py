@@ -1,48 +1,47 @@
 from scapy.all import *
 import re
+import os
 
 # Функция для модификации пакета
 def modify_packet(packet):
     if packet.haslayer(TCP) and packet.haslayer(Raw):
-        payload = packet[Raw].load.decode(errors='ignore')
-
-        # Фрагментация первого пакета данных на уровне TCP
-        if packet[TCP].seq == 0:
-            fragments = fragment(payload.encode(), fragsize=1440)
-            for frag in fragments:
-                send(frag)
-            return
-        
-        # Замена Host заголовка на hoSt
-        payload = re.sub(r'Host:', 'hoSt:', payload)
-
-        # Удаление пробела между именем заголовка и значением в Host заголовке
-        payload = re.sub(r'Host: ', 'Host:', payload)
-
-        # Добавление дополнительного пространства между HTTP-методом и URI
-        payload = re.sub(r'(GET|POST) /(.*)', r'\1  /\2', payload)
-
-        packet[Raw].load = payload.encode()
-        del packet[IP].len
-        del packet[IP].chksum
-        del packet[TCP].chksum
-
-        # Проверка и фрагментация пакета, если его размер превышает MTU
-        if len(packet) > 1500:  # Предполагается, что 1500 - это размер MTU
-            fragments = fragment(packet, fragsize=1440)  # 1440 для учёта заголовков IP и TCP
-            for frag in fragments:
-                send(frag)
-        else:
-            send(packet)
+        try:
+            payload = packet[Raw].load.decode(errors='ignore')
+            
+            # Замена Host заголовка на hoSt
+            payload = re.sub(r'Host:', 'hoSt:', payload)
+            
+            # Удаление пробела между именем заголовка и значением в Host заголовке
+            payload = re.sub(r'Host: ', 'Host:', payload)
+            
+            # Добавление дополнительного пространства между HTTP-методом и URI
+            payload = re.sub(r'(GET|POST) /(.*)', r'\1  /\2', payload)
+            
+            packet[Raw].load = payload.encode()
+            del packet[IP].len
+            del packet[IP].chksum
+            del packet[TCP].chksum
+            
+            # Фрагментация пакета, если он слишком большой
+            fragmented_packets = fragment(packet, fragsize=1400)
+            for frag in fragmented_packets:
+                send(frag, verbose=False)
+        except Exception as e:
+            print(f"Error modifying packet: {e}")
 
 # Захват и модификация пакетов
 def packet_callback(packet):
     if packet.haslayer(TCP):
         modify_packet(packet)
 
-# Установить правила iptables для перенаправления трафика на локальный порт 9999
-import os
-os.system('iptables -t nat -A OUTPUT -p tcp --dport 80 -j REDIRECT --to-port 9999')
+try:
+    # Установить правила iptables для перенаправления трафика на локальный порт 9999
+    os.system('sudo iptables -t nat -A OUTPUT -p tcp --dport 80 -j REDIRECT --to-port 9999')
+    os.system('sudo iptables -t nat -A PREROUTING -p tcp --dport 80 -j REDIRECT --to-port 9999')
 
-# Запуск захвата пакетов
-sniff(prn=packet_callback, filter='tcp', store=0)
+    # Запуск захвата пакетов
+    sniff(prn=packet_callback, filter='tcp', store=0)
+except PermissionError:
+    print("Ошибка: необходимо запустить скрипт с правами суперпользователя (sudo).")
+except Exception as e:
+    print(f"Произошла ошибка: {e}")
